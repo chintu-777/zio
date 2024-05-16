@@ -254,3 +254,4 @@ Copyright 2017 - 2024 John A. De Goes and the ZIO Contributors. All rights reser
 [Image-Scalac]: ./website/static/img/scalac.svg "Scalac"
 [Image-SeptimalMind]: ./website/static/img/septimal_mind.svg "Septimal Mind"
 [Image-YourKit]: ./website/static/img/yourkit.png "YourKit"
+
