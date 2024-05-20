@@ -3751,6 +3751,7 @@ object ZStreamSpec extends ZIOBaseSpec {
               done     <- ref.get
             } yield assertTrue(elements == Chunk(1, 1, 2, 3, 5, 8) && done == 20)
           },
+          
           test("sink that is done before stream") {
             for {
               ref      <- Ref.make(0)
