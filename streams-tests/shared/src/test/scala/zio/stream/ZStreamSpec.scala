@@ -3789,7 +3789,6 @@ object ZStreamSpec extends ZIOBaseSpec {
             result <- ref.get
             } yield assertTrue(result == 6)
         }
-}
         ),
         suite("throttleEnforce")(
           test("free elements") {
