@@ -3278,21 +3278,21 @@ def tapSink[R1 <: R, E1 >: E](
       ZChannel.readWithCause(
         chunk =>
           ZChannel
-            .fromZIO(queue.offer(Take.chunk(chunk)))
+            .fromZIO(queue.offer(Take.chunk(chunk)).tap(_ => ZIO.debug(s"Offered chunk: $chunk")))
             .foldCauseChannel(
               _ => ZChannel.write(chunk) *> ZChannel.identity,
               _ => ZChannel.write(chunk) *> loop
             ),
         cause =>
           ZChannel
-            .fromZIO(queue.offer(Take.failCause(cause)))
+            .fromZIO(queue.offer(Take.failCause(cause)).tap(_ => ZIO.debug(s"Offered fail cause: $cause")))
             .foldCauseChannel(
               _ => ZChannel.refailCause(cause),
               _ => ZChannel.refailCause(cause)
             ),
         _ =>
           ZChannel
-            .fromZIO(queue.offer(Take.end))
+            .fromZIO(queue.offer(Take.end).tap(_ => ZIO.debug("Offered end")))
             .foldCauseChannel(
               _ => ZChannel.unit,
               _ => ZChannel.unit
