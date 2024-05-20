@@ -3303,7 +3303,7 @@ def tapSink[R1 <: R, E1 >: E](
         .pipeTo(loop)
         .ensuring(queue.offer(Take.end).forkDaemon *> queue.awaitShutdown) *> ZChannel.unit
     )
-      .merge(ZStream.execute((promise.succeed(()) *> right.run(sink).ensuring(queue.shutdown))), HaltStrategy.Both)
+      .merge(ZStream.execute((promise.succeed(()) *> right.run(sink)).ensuring(queue.shutdown)), HaltStrategy.Both)
   }
 
   /**
