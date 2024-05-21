@@ -27,7 +27,6 @@ import zio.stream.internal.{ZInputStream, ZReader}
 import java.io.{IOException, InputStream}
 import scala.collection.mutable
 import scala.reflect.ClassTag
-import scala.util.chaining._
 
 final class ZStream[-R, +E, +A] private (val channel: ZChannel[R, Any, Any, Any, E, Chunk[A], Any]) { self =>
 
@@ -3278,33 +3277,40 @@ def tapSink[R1 <: R, E1 >: E](
     lazy val loop: ZChannel[R1, E, Chunk[A], Any, E1, Chunk[A], Any] =
       ZChannel.readWithCause(
         chunk =>
-          ZChannel
-            .fromZIO(queue.offer(Take.chunk(chunk)).tap(_ => ZIO.debug(s"Offered chunk: $chunk")))
-            .foldCauseChannel(
-              _ => ZChannel.write(chunk) *> ZChannel.identity,
-              _ => ZChannel.write(chunk) *> loop
-            ),
+          ZChannel.fromZIO(
+            queue.offer(Take.chunk(chunk)) *> ZIO.debug(s"Offered chunk: $chunk")
+          ).foldCauseChannel(
+            _ => ZChannel.write(chunk) *> ZChannel.identity,
+            _ => ZChannel.write(chunk) *> loop
+          ),
         cause =>
-          ZChannel
-            .fromZIO(queue.offer(Take.failCause(cause)).tap(_ => ZIO.debug(s"Offered fail cause: $cause")))
-            .foldCauseChannel(
-              _ => ZChannel.refailCause(cause),
-              _ => ZChannel.refailCause(cause)
-            ),
+          ZChannel.fromZIO(
+            queue.offer(Take.failCause(cause)) *> ZIO.debug(s"Offered fail cause: $cause")
+          ).foldCauseChannel(
+            _ => ZChannel.refailCause(cause),
+            _ => ZChannel.refailCause(cause)
+          ),
         _ =>
-          ZChannel
-            .fromZIO(queue.offer(Take.end).tap(_ => ZIO.debug("Offered end")))
-            .foldCauseChannel(
-              _ => ZChannel.unit,
-              _ => ZChannel.unit
-            )
+          ZChannel.fromZIO(
+            queue.offer(Take.end) *> ZIO.debug("Offered end")
+          ).foldCauseChannel(
+            _ => ZChannel.unit,
+            _ => ZChannel.unit
+          )
       )
     new ZStream(
-      ZChannel.fromZIO(promise.await).tap(_ => ZIO.debug("Promise awaited")) *> self.channel
+      ZChannel.fromZIO(promise.await *> ZIO.debug("Promise awaited")) *> self.channel
         .pipeTo(loop)
-        .ensuring(queue.offer(Take.end).tap(_ => ZIO.debug("Ensuring end offered")).fork *> queue.awaitShutdown.tap(_ => ZIO.debug("Queue shutdown awaited"))) *> ZChannel.unit
+        .ensuring(
+          queue.offer(Take.end) *> ZIO.debug("Ensuring end offered") *> queue.awaitShutdown *> ZIO.debug("Queue shutdown awaited")
+        ) *> ZChannel.unit
     )
-      .merge(ZStream.execute((promise.succeed(()).tap(_ => ZIO.debug("Promise succeeded")) *> right.run(sink).ensuring(queue.shutdown.tap(_ => ZIO.debug("Queue shutdown")))).ensuring(promise.await.tap(_ => ZIO.debug("Promise awaited in merge")))), HaltStrategy.Both)
+      .merge(
+        ZStream.execute(
+          (promise.succeed(()) *> ZIO.debug("Promise succeeded") *> right.run(sink).ensuring(queue.shutdown *> ZIO.debug("Queue shutdown")))
+          .ensuring(promise.await *> ZIO.debug("Promise awaited in merge"))
+        ), HaltStrategy.Both
+      )
   }
 
   /**
