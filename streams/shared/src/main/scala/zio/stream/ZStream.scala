@@ -3277,40 +3277,33 @@ def tapSink[R1 <: R, E1 >: E](
     lazy val loop: ZChannel[R1, E, Chunk[A], Any, E1, Chunk[A], Any] =
       ZChannel.readWithCause(
         chunk =>
-          ZChannel.fromZIO(
-            queue.offer(Take.chunk(chunk)) *> ZIO.debug(s"Offered chunk: $chunk")
-          ).foldCauseChannel(
-            _ => ZChannel.write(chunk) *> ZChannel.identity,
-            _ => ZChannel.write(chunk) *> loop
-          ),
+          ZChannel
+            .fromZIO(queue.offer(Take.chunk(chunk)))
+            .foldCauseChannel(
+              _ => ZChannel.write(chunk) *> ZChannel.identity,
+              _ => ZChannel.write(chunk) *> loop
+            ),
         cause =>
-          ZChannel.fromZIO(
-            queue.offer(Take.failCause(cause)) *> ZIO.debug(s"Offered fail cause: $cause")
-          ).foldCauseChannel(
-            _ => ZChannel.refailCause(cause),
-            _ => ZChannel.refailCause(cause)
-          ),
+          ZChannel
+            .fromZIO(queue.offer(Take.failCause(cause)))
+            .foldCauseChannel(
+              _ => ZChannel.refailCause(cause),
+              _ => ZChannel.refailCause(cause)
+            ),
         _ =>
-          ZChannel.fromZIO(
-            queue.offer(Take.end) *> ZIO.debug("Offered end")
-          ).foldCauseChannel(
-            _ => ZChannel.unit,
-            _ => ZChannel.unit
-          )
+          ZChannel
+            .fromZIO(queue.offer(Take.end))
+            .foldCauseChannel(
+              _ => ZChannel.unit,
+              _ => ZChannel.unit
+            )
       )
     new ZStream(
-      ZChannel.fromZIO(promise.await *> ZIO.debug("Promise awaited")) *> self.channel
+      ZChannel.fromZIO(promise.await) *> self.channel
         .pipeTo(loop)
-        .ensuring(
-          queue.offer(Take.end) *> ZIO.debug("Ensuring end offered") *> queue.awaitShutdown *> ZIO.debug("Queue shutdown awaited")
-        ) *> ZChannel.unit
+        .ensuring(queue.offer(Take.end).forkDaemon *> queue.awaitShutdown) *> ZChannel.unit
     )
-      .merge(
-        ZStream.execute(
-          (promise.succeed(()) *> ZIO.debug("Promise succeeded") *> right.run(sink).ensuring(queue.shutdown *> ZIO.debug("Queue shutdown")))
-          .ensuring(promise.await *> ZIO.debug("Promise awaited in merge"))
-        ), HaltStrategy.Both
-      )
+      .merge(ZStream.execute((promise.succeed(()) *> right.run(sink).ensuring(queue.shutdown))), HaltStrategy.Both)
   }
 
   /**
