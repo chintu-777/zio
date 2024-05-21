@@ -27,6 +27,7 @@ import zio.stream.internal.{ZInputStream, ZReader}
 import java.io.{IOException, InputStream}
 import scala.collection.mutable
 import scala.reflect.ClassTag
+import scala.util.chaining._
 
 final class ZStream[-R, +E, +A] private (val channel: ZChannel[R, Any, Any, Any, E, Chunk[A], Any]) { self =>
 
