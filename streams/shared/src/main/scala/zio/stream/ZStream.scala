@@ -3301,9 +3301,9 @@ def tapSink[R1 <: R, E1 >: E](
     new ZStream(
       ZChannel.fromZIO(promise.await) *> self.channel
         .pipeTo(loop)
-        .ensuring(queue.offer(Take.end).forkIn(scope) *> queue.awaitShutdown) *> ZChannel.unit
+        .ensuring(queue.offer(Take.end).fork *> queue.awaitShutdown) *> ZChannel.unit
     )
-      .merge(ZStream.execute((promise.succeed(()) *> right.run(sink)).ensuring(queue.shutdown)), HaltStrategy.Both)
+      .merge(ZStream.execute((promise.succeed(()) *> right.run(sink).ensuring(queue.shutdown)).ensuring(promise.await)), HaltStrategy.Both)
   }
 
   /**
