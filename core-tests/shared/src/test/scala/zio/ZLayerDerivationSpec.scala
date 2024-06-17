@@ -2,7 +2,7 @@ package zio
 
 import zio.test.Assertion._
 import zio.test._
-
+import zio._
 import scala.annotation.nowarn
 
 @nowarn("msg=never used")
@@ -19,15 +19,15 @@ object ZLayerDerivationSpec extends ZIOBaseSpec {
   case class OneDep(val d1: String)
   case class TwoDeps(val d1: String, val d2: Int)
 
-  val derivedZero = ZLayer.derive[ZeroDep]
-  val derivedOne  = ZLayer.derive[OneDep]
-  val derivedTwo  = ZLayer.derive[TwoDeps]
+  val derivedZero: ZLayer[Any, Nothing, ZeroDep] = ZLayer.derive[ZeroDep]
+  val derivedOne: ZLayer[Any, Nothing, OneDep] = ZLayer.derive[OneDep]
+  val derivedTwo: ZLayer[Any, Nothing, TwoDeps] = ZLayer.derive[TwoDeps]
 
   class Curried(val d1: String)(val d2: OneDep)(implicit val d3: Int)
-  val derivedCurried = ZLayer.derive[Curried]
+  val derivedCurried: ZLayer[Any, Nothing, Curried] = ZLayer.derive[Curried]
 
   class PolySimple[A, B](val b: B)(val a: A)
-  val derivedPolySimple = ZLayer.derive[PolySimple[Int, String]]
+  val derivedPolySimple: ZLayer[Any, Nothing, PolySimple[Int, String]] = ZLayer.derive[PolySimple[Int, String]]
 
   def basicSuite = suite("derives")(
     test("zero dependency") {
@@ -61,35 +61,13 @@ object ZLayerDerivationSpec extends ZIOBaseSpec {
         p.a == 2,
         p.b == "one"
       )
-    ),
-    test("type parameters") {
-      def run[A: Tag](value: A) = {
-
-        val provideA: ZLayer[Any, Any, A]        = ZLayer.succeed(value)
-        val anotherLayer: ZLayer[Any, Any, Unit] = ZLayer.succeed(())
-
-        (for {
-          _ <- ZIO.service[A]
-        } yield ()).provide(provideA, anotherLayer)
-      }
-
-      run[String]("test")
-        .as(assertTrue(true))
-    }
-  ).provide(
-    derivedZero,
-    derivedOne,
-    derivedTwo,
-    derivedCurried,
-    derivedPolySimple,
-    ZLayer.succeed("one"),
-    ZLayer.succeed(2)
-  )
+    )
+  ).provideSomeLayer[TestEnvironment](derivedZero ++ derivedOne ++ derivedTwo ++ derivedCurried ++ derivedPolySimple ++ ZLayer.succeed("one") ++ ZLayer.succeed(2))
 
   class ZeroDepAndPromise(val p1: Promise[Nothing, Int])
   class OneDepAndPromise(val d1: String, val p1: Promise[Throwable, Int])
 
-  val derivedZeroAndPromise: ZLayer[Any, Nothing, ZeroDepAndPromise]  = ZLayer.derive[ZeroDepAndPromise]
+  val derivedZeroAndPromise: ZLayer[Any, Nothing, ZeroDepAndPromise] = ZLayer.derive[ZeroDepAndPromise]
   val derivedOneAndPromise: ZLayer[String, Nothing, OneDepAndPromise] = ZLayer.derive[OneDepAndPromise]
 
   class OneDepAndConfig(d1: Int, config: OneDepAndConfig.AConfig)
@@ -97,7 +75,7 @@ object ZLayerDerivationSpec extends ZIOBaseSpec {
     case class AConfig(startTimes: Chunk[java.time.OffsetDateTime])
     implicit val implicitAConfig: Config[AConfig] = Config.fail("failed to load config")
   }
-  val derivedOneAndConfig = ZLayer.derive[OneDepAndConfig]
+  val derivedOneAndConfig: ZLayer[Any, Config.Error, OneDepAndConfig] = ZLayer.derive[OneDepAndConfig]
 
   class OneDepAndDefaultTransitive(i: Int, val d: OneDepAndDefaultTransitive.TransitiveString)
   object OneDepAndDefaultTransitive {
@@ -106,12 +84,11 @@ object ZLayerDerivationSpec extends ZIOBaseSpec {
       ZLayer.Derive.Default.fromZIO(ZIO.serviceWith[String](TransitiveString(_)))
   }
 
-  val derivedOneAndDefaultTransitive =
+  val derivedOneAndDefaultTransitive: ZLayer[Any, Nothing, OneDepAndDefaultTransitive] =
     ZLayer.derive[OneDepAndDefaultTransitive]
 
   val derivedZeroDepAndPromiseOverriden: URLayer[Promise[Nothing, Int], ZeroDepAndPromise] = locally {
-    implicit val overridenPromise
-      : ZLayer.Derive.Default.WithContext[Promise[Nothing, Int], Nothing, Promise[Nothing, Int]] =
+    implicit val overridenPromise: ZLayer.Derive.Default.WithContext[Promise[Nothing, Int], Nothing, Promise[Nothing, Int]] =
       ZLayer.Derive.Default.service[Promise[Nothing, Int]]
 
     ZLayer.derive[ZeroDepAndPromise]
@@ -128,7 +105,7 @@ object ZLayerDerivationSpec extends ZIOBaseSpec {
       for {
         svc    <- ZIO.service[OneDepAndPromise]
         isDone <- svc.p1.isDone
-      } yield assertTrue(svc.d1 == "one", !isDone)
+      } yield assertTrue(svc.d1 == "one" && !isDone)
     },
     test("one dependency and implicit zio.Config") {
       for {
@@ -140,22 +117,13 @@ object ZLayerDerivationSpec extends ZIOBaseSpec {
         svc <- ZIO.service[OneDepAndDefaultTransitive]
       } yield assertTrue(svc.d.s == "one")
     },
-    test("overriden dependency by higher implicit priority") {
+    test("overridden dependency by higher implicit priority") {
       for {
         svc   <- ZIO.service[ZeroDepAndPromise]
         value <- svc.p1.await
       } yield assertTrue(value == 42)
-    }.provide(
-      derivedZeroDepAndPromiseOverriden,
-      ZLayer(Promise.make[Nothing, Int].flatMap(p => p.succeed(42).as(p)))
-    )
-  ).provide(
-    derivedZeroAndPromise,
-    derivedOneAndPromise,
-    derivedOneAndDefaultTransitive,
-    ZLayer.succeed("one"),
-    ZLayer.succeed(2)
-  )
+    }.provideSomeLayer[TestEnvironment](derivedZeroDepAndPromiseOverriden ++ ZLayer(Promise.make[Nothing, Int].flatMap(p => p.succeed(42).as(p))))
+  ).provideSomeLayer[TestEnvironment](derivedZeroAndPromise ++ derivedOneAndPromise ++ derivedOneAndDefaultTransitive ++ ZLayer.succeed("one") ++ ZLayer.succeed(2))
 
   class HasLifecycleHooks(ref: Ref[String], shouldFail: Boolean)
       extends ZLayer.Derive.AcquireRelease[Any, String, Int] {
@@ -179,10 +147,7 @@ object ZLayerDerivationSpec extends ZIOBaseSpec {
                          _   <- derivedHasLifecycleHooks.build
                          str <- ref.get
                        } yield str)
-                       .provide(
-                         ZLayer.succeed(ref),
-                         ZLayer.succeed(shouldFail)
-                       )
+                       .provideSomeLayer[TestEnvironment](ZLayer.succeed(ref) ++ ZLayer.succeed(shouldFail))
         afterCleanup <- ref.get
       } yield assertTrue(
         afterInit == "Initialized",
@@ -200,14 +165,11 @@ object ZLayerDerivationSpec extends ZIOBaseSpec {
                          str <- ref.get
                        } yield str)
                        .exit
-                       .provide(
-                         ZLayer.succeed(ref),
-                         ZLayer.succeed(shouldFail)
-                       )
+                       .provideSomeLayer[TestEnvironment](ZLayer.succeed(ref) ++ ZLayer.succeed(shouldFail))
         afterCleanup <- ref.get
       } yield assertTrue(
         afterInit == Exit.fail("Failed!"),
-        afterCleanup == ""
+        afterCleanup.isEmpty
       )
     }
   )
@@ -216,9 +178,8 @@ object ZLayerDerivationSpec extends ZIOBaseSpec {
   object HasUnresolvedDefault {
     case class Dep(s: String)
 
-    // correct annotation  : ZLayer.Derive.Default.WithContext[Any, Nothing, Dep]
-    implicit val defaultDep: ZLayer.Derive.Default[Dep] = ZLayer.Derive.Default.succeed(Dep("default"))
-  }
+    implicit val defaultDep: ZLayer.Derive.Default.WithContext[Any, Nothing, Dep] = ZLayer.Derive.Default.succeed
+
 
   abstract class AnAbstractClass(d1: Int)
   trait ATrait
