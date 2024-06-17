@@ -234,7 +234,7 @@ object ZLayerDerivationMacros {
     (rType.simplified.asType, eType.simplified.asType) match {
       case ('[r], '[e]) =>
         runDefault(fromDefaults.zip(reTypes), Map.empty)
-          .asExprOf[ZLayer[r, e, A]]
+          .asExprOf[ZLayer[Any, Nothing, A]]
     }
   }
 }
