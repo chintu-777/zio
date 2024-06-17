@@ -8,7 +8,7 @@ private[zio] class ZLayerDerivationMacros(val c: whitebox.Context) {
 
   case class Param(tpe: Type, name: TermName, defaultOrService: Either[Type, Tree], rType: Type, eType: Option[Type])
 
-  def deriveImpl[A: WeakTypeTag] = {
+  def deriveImpl[A: WeakTypeTag]: Tree = {
 
     val tpe = weakTypeOf[A]
 
@@ -78,11 +78,11 @@ private[zio] class ZLayerDerivationMacros(val c: whitebox.Context) {
       })
 
     val serviceCalls = params.collect { case Param(_, name, Left(depType), _, _) =>
-      fq"$name <- _root_.zio.ZIO.service[$depType]"
+      q"$name <- _root_.zio.ZIO.service[$depType]"
     }
 
     val defaultLayers = params.collect { case Param(_, name, Right(defaultExpr), _, _) =>
-      fq"$name <- $defaultExpr.layer"
+      q"$name <- $defaultExpr.layer"
     }
 
     val argMap = params.map { p =>
@@ -105,8 +105,8 @@ private[zio] class ZLayerDerivationMacros(val c: whitebox.Context) {
             instance.scoped.as(instance)
           }"""
       } else
-        q"_root_.zio.ZLayer.apply" ->
-          q"_root_.zio.ZIO.succeed[$tpe]($newInstance)"
+        q"_root_.zio.ZLayer.fromFunction" ->
+          q"_root_.zio.ZIO.effect($newInstance)"
 
     q"""
     for {
