@@ -9,7 +9,7 @@ object ZLayerDerivationMacros {
 
   transparent inline def deriveLayer[A]: ZLayer[Any, Nothing, A] = ${ deriveLayerImpl[A] }
 
-  def deriveLayerImpl[A: Type](using Quotes) = {
+  def deriveLayerImpl[A: Type](using Quotes): Expr[ZLayer[Any, Nothing, A]]  = {
     import quotes.reflect._
 
     val tpe       = TypeRepr.of[A]
