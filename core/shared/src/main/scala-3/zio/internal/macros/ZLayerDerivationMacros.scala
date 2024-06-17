@@ -7,7 +7,7 @@ import zio.internal.ansi.AnsiStringOps
 
 object ZLayerDerivationMacros {
 
-  transparent inline def deriveLayer[A]: ZLayer[Nothing, Any, A] = ${ deriveLayerImpl[A] }
+  transparent inline def deriveLayer[A]: ZLayer[Any, Nothing, A] = ${ deriveLayerImpl[A] }
 
   def deriveLayerImpl[A: Type](using Quotes) = {
     import quotes.reflect._
