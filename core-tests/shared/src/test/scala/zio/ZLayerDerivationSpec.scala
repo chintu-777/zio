@@ -1,225 +1,73 @@
+/*
+ * Copyright 2017-2020 John A. De Goes and the ZIO Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package zio
 
-import zio.test.Assertion._
-import zio.test._
-import zio._
-import scala.annotation.nowarn
+import zio.internal.macros.{DummyK, ZLayerMakeMacros}
 
-@nowarn("msg=never used")
-object ZLayerDerivationSpec extends ZIOBaseSpec {
+private[zio] trait ZLayerCompanionVersionSpecific {
 
-  override def spec = suite("ZLayer.derive[A]")(
-    basicSuite,
-    defaultSuite,
-    lifecycleSuite,
-    failureSuite
-  )
+  /**
+   * Automatically assembles a layer for the provided type.
+   *
+   * {{{
+   * ZLayer.make[Car](carLayer, wheelsLayer, engineLayer)
+   * }}}
+   */
+  def make[R]: MakePartiallyApplied[R] =
+    new MakePartiallyApplied[R]
 
-  case class ZeroDep()
-  case class OneDep(val d1: String)
-  case class TwoDeps(val d1: String, val d2: Int)
+  /**
+   * Automatically constructs a layer for the provided type `R`, leaving a
+   * remainder `R0`.
+   *
+   * {{{
+   * val carLayer: ZLayer[Engine with Wheels, Nothing, Car] = ???
+   * val wheelsLayer: ZLayer[Any, Nothing, Wheels] = ???
+   *
+   * val layer = ZLayer.makeSome[Engine, Car](carLayer, wheelsLayer)
+   * }}}
+   */
+  def makeSome[R0, R]: MakeSomePartiallyApplied[R0, R] =
+    new MakeSomePartiallyApplied[R0, R]
 
-  val derivedZero: ZLayer[Any, Nothing, ZeroDep] = ZLayer.derive[ZeroDep]
-  val derivedOne: ZLayer[Any, Nothing, OneDep] = ZLayer.derive[OneDep]
-  val derivedTwo: ZLayer[Any, Nothing, TwoDeps] = ZLayer.derive[TwoDeps]
+  /**
+   * Automatically derives a simple layer for the provided type.
+   *
+   * {{{
+   * class Car(wheels: Wheels, engine: Engine) { /* ... */ }
+   *
+   * val carLayer: URLayer[Wheels & Engine, Car] = ZLayer.derive[Car]
+   * }}}
+   */
+  def derive[A]: ZLayer[Nothing, Any, A] = macro zio.internal.macros.ZLayerDerivationMacros.deriveImpl[A]
+}
 
-  class Curried(val d1: String)(val d2: OneDep)(implicit val d3: Int)
-  val derivedCurried: ZLayer[Any, Nothing, Curried] = ZLayer.derive[Curried]
+final class MakePartiallyApplied[R](val dummy: Boolean = true) extends AnyVal {
+  def apply[E](
+    layer: ZLayer[_, E, _]*
+  )(implicit dummyKRemainder: DummyK[Any], dummyK: DummyK[R]): ZLayer[Any, E, R] =
+    macro ZLayerMakeMacros.makeImpl[E, Any, R]
+}
 
-  class PolySimple[A, B](val b: B)(val a: A)
-  val derivedPolySimple: ZLayer[Any, Nothing, PolySimple[Int, String]] = ZLayer.derive[PolySimple[Int, String]]
-
-  def basicSuite = suite("derives")(
-    test("zero dependency") {
-      for {
-        d0 <- ZIO.service[ZeroDep]
-      } yield assertTrue(d0 == ZeroDep())
-    },
-    test("one dependency") {
-      for {
-        d1 <- ZIO.service[OneDep]
-      } yield assertTrue(d1 == OneDep("one"))
-    },
-    test("two dependencies") {
-      for {
-        d2 <- ZIO.service[TwoDeps]
-      } yield assertTrue(d2 == TwoDeps("one", 2))
-    },
-    test("curried constructor")(
-      for {
-        c <- ZIO.service[Curried]
-      } yield assertTrue(
-        c.d1 == "one",
-        c.d2 == OneDep("one"),
-        c.d3 == 2
-      )
-    ),
-    test("parametric polymorphism")(
-      for {
-        p <- ZIO.service[PolySimple[Int, String]]
-      } yield assertTrue(
-        p.a == 2,
-        p.b == "one"
-      )
-    )
-  ).provideSomeLayer[TestEnvironment](derivedZero ++ derivedOne ++ derivedTwo ++ derivedCurried ++ derivedPolySimple ++ ZLayer.succeed("one") ++ ZLayer.succeed(2))
-
-  class ZeroDepAndPromise(val p1: Promise[Nothing, Int])
-  class OneDepAndPromise(val d1: String, val p1: Promise[Throwable, Int])
-
-  val derivedZeroAndPromise: ZLayer[Any, Nothing, ZeroDepAndPromise] = ZLayer.derive[ZeroDepAndPromise]
-  val derivedOneAndPromise: ZLayer[String, Nothing, OneDepAndPromise] = ZLayer.derive[OneDepAndPromise]
-
-  class OneDepAndConfig(d1: Int, config: OneDepAndConfig.AConfig)
-  object OneDepAndConfig {
-    case class AConfig(startTimes: Chunk[java.time.OffsetDateTime])
-    implicit val implicitAConfig: Config[AConfig] = Config.fail("failed to load config")
-  }
-  val derivedOneAndConfig: ZLayer[Any, Config.Error, OneDepAndConfig] = ZLayer.derive[OneDepAndConfig]
-
-  class OneDepAndDefaultTransitive(i: Int, val d: OneDepAndDefaultTransitive.TransitiveString)
-  object OneDepAndDefaultTransitive {
-    case class TransitiveString(s: String)
-    implicit val defaultTransitiveString: ZLayer.Derive.Default.WithContext[String, Nothing, TransitiveString] =
-      ZLayer.Derive.Default.fromZIO(ZIO.serviceWith[String](TransitiveString(_)))
-  }
-
-  val derivedOneAndDefaultTransitive: ZLayer[Any, Nothing, OneDepAndDefaultTransitive] =
-    ZLayer.derive[OneDepAndDefaultTransitive]
-
-  val derivedZeroDepAndPromiseOverriden: URLayer[Promise[Nothing, Int], ZeroDepAndPromise] = locally {
-    implicit val overridenPromise: ZLayer.Derive.Default.WithContext[Promise[Nothing, Int], Nothing, Promise[Nothing, Int]] =
-      ZLayer.Derive.Default.service[Promise[Nothing, Int]]
-
-    ZLayer.derive[ZeroDepAndPromise]
-  }
-
-  def defaultSuite = suite("with ZLayer.Derive.Default[A]")(
-    test("zero dependency and Promise") {
-      for {
-        svc    <- ZIO.service[ZeroDepAndPromise]
-        isDone <- svc.p1.isDone
-      } yield assertTrue(!isDone)
-    },
-    test("one dependency and Promise") {
-      for {
-        svc    <- ZIO.service[OneDepAndPromise]
-        isDone <- svc.p1.isDone
-      } yield assertTrue(svc.d1 == "one" && !isDone)
-    },
-    test("one dependency and implicit zio.Config") {
-      for {
-        exit <- ZIO.scoped(derivedOneAndConfig.build).exit
-      } yield assert(exit)(failsWithA[Config.Error])
-    },
-    test("one dependency and default value from transitive dependency") {
-      for {
-        svc <- ZIO.service[OneDepAndDefaultTransitive]
-      } yield assertTrue(svc.d.s == "one")
-    },
-    test("overridden dependency by higher implicit priority") {
-      for {
-        svc   <- ZIO.service[ZeroDepAndPromise]
-        value <- svc.p1.await
-      } yield assertTrue(value == 42)
-    }.provideSomeLayer[TestEnvironment](derivedZeroDepAndPromiseOverriden ++ ZLayer(Promise.make[Nothing, Int].flatMap(p => p.succeed(42).as(p))))
-  ).provideSomeLayer[TestEnvironment](derivedZeroAndPromise ++ derivedOneAndPromise ++ derivedOneAndDefaultTransitive ++ ZLayer.succeed("one") ++ ZLayer.succeed(2))
-
-  class HasLifecycleHooks(ref: Ref[String], shouldFail: Boolean)
-      extends ZLayer.Derive.AcquireRelease[Any, String, Int] {
-    override def acquire: ZIO[Any, String, Int] =
-      ZIO.fail("Failed!").when(shouldFail) *> ref.set("Initialized").as(42)
-
-    override def release(n: Int): ZIO[Any, Nothing, Any] =
-      ref.set(s"Cleaned up $n resources")
-  }
-  val derivedHasLifecycleHooks: ZLayer[Ref[String] with Boolean, String, HasLifecycleHooks] =
-    ZLayer.derive[HasLifecycleHooks]
-
-  def lifecycleSuite = suite("with ZLayer.LifecycleHooks[R, E]")(
-    test("initialize and cleanup") {
-      for {
-        ref       <- Ref.make("")
-        shouldFail = false
-
-        afterInit <- ZIO
-                       .scoped(for {
-                         _   <- derivedHasLifecycleHooks.build
-                         str <- ref.get
-                       } yield str)
-                       .provideSomeLayer[TestEnvironment](ZLayer.succeed(ref) ++ ZLayer.succeed(shouldFail))
-        afterCleanup <- ref.get
-      } yield assertTrue(
-        afterInit == "Initialized",
-        afterCleanup == "Cleaned up 42 resources"
-      )
-    },
-    test("can fail during initialize") {
-      for {
-        ref       <- Ref.make("")
-        shouldFail = true
-
-        afterInit <- ZIO
-                       .scoped(for {
-                         _   <- derivedHasLifecycleHooks.build
-                         str <- ref.get
-                       } yield str)
-                       .exit
-                       .provideSomeLayer[TestEnvironment](ZLayer.succeed(ref) ++ ZLayer.succeed(shouldFail))
-        afterCleanup <- ref.get
-      } yield assertTrue(
-        afterInit == Exit.fail("Failed!"),
-        afterCleanup.isEmpty
-      )
-    }
-  )
-
-  class HasUnresolvedDefault(dep: HasUnresolvedDefault.Dep)
-  object HasUnresolvedDefault {
-    case class Dep(s: String)
-
-    implicit val defaultDep: ZLayer.Derive.Default.WithContext[Any, Nothing, Dep] = ZLayer.Derive.Default.succeed
-
-
-  abstract class AnAbstractClass(d1: Int)
-  trait ATrait
-
-  def failureSuite = suite("fails to derive")(
-    test("ZLayer.Derive.Default[A] with incorrect type annotation")(
-      for {
-        res <- typeCheck("ZLayer.derive[HasUnresolvedDefault]")
-      } yield
-        if (TestVersion.isScala2)
-          assertTrue(res.left.exists(_.startsWith("Failed to derive a ZLayer")))
-        else
-          assertTrue(res.isLeft)
-    ),
-    test("trait")(
-      for {
-        res <- typeCheck("ZLayer.derive[ATrait]")
-      } yield
-        if (TestVersion.isScala2)
-          assertTrue(res.left.exists(_.startsWith("Failed to derive a ZLayer")))
-        else
-          assertTrue(res.isLeft)
-    ),
-    test("abstract class")(
-      for {
-        res <- typeCheck("ZLayer.derive[AnAbstractClass]")
-      } yield
-        if (TestVersion.isScala2)
-          assertTrue(res.left.exists(_.startsWith("Failed to derive a ZLayer")))
-        else
-          assertTrue(res.isLeft)
-    ),
-    test("java class")(
-      for {
-        res <- typeCheck("ZLayer.derive[java.util.ArrayList[Int]]")
-      } yield
-        if (TestVersion.isScala2)
-          assertTrue(res.left.exists(_.startsWith("Failed to derive a ZLayer")))
-        else
-          assertTrue(res.isLeft)
-    )
-  )
+final class MakeSomePartiallyApplied[R0, R](
+  val dummy: Boolean = true
+) extends AnyVal {
+  def apply[E](
+    layer: ZLayer[_, E, _]*
+  )(implicit dummyKRemainder: DummyK[R0], dummyK: DummyK[R]): ZLayer[R0, E, R] =
+    macro ZLayerMakeMacros.makeSomeImpl[E, R0, R]
 }
